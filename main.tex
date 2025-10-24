@@ -18,7 +18,7 @@
 \usepackage{subcaption} % Add to preamble
 
 
-\title{AMIC Uncertainty – Bayesian Variational}
+\title{Single Perceptron Bayesian Time Series}
 \author{Leon King}
 \date{\today} % This will insert current date
 % introduce paper.bib
@@ -45,5 +45,27 @@
 
 \section{Introduction}
 
+Given a scaler time series $x_1, x_2, \dots, x_d$, we want to build a single perceptron Bayesian time series model to predict $x_{d+1}$ and generate the uncertainty for this prediction. $$x_{d+1} = f\left(\sum_{i=1}^dw_i x_i + w_0\right) + \epsilon_{d+1}$$ where $f$ is the activation function and $\mathbf{w}=(w_0,w_1,w_2,\cdots, w_d)$ is the weight vector of this perceptron, $\epsilon \sim N(0, \sigma^2_\epsilon)$ . Sometimes $w_0$ is called bias term. Now we assign a normal distribution as a prior for the weight vector. The prior is $$p(\mathbf{w})\sim N\left([\mu_{1p},\mu_{2p},\cdots,\mu_{2p}], \text{diag}(\sigma_{1p}, \sigma_{2p}, \cdots,\sigma_{dp})]\right)$$
+Now we are trying the recency decay prior mean as $$\mu_k = c\cdot e^{-\lambda(d-k)}$$ where $c$ is a scaling constant, and $\lambda$ controls the exponential decay. So far we assume all $\sigma_k$ from the prior distribution is the same, $\sigma_k = 0.5$ and each weight distribution is independent.
+
+We use the Bayesian Variational Inference to approximate the true posterior distribution with a normal distribution $$q(\mathbf{w})\sim N\left([\mu_{1q},\mu_{2q},\cdots,\mu_{dq}], \text{diag}(\sigma_{1q}, \sigma_{2q}, \cdots,\sigma_{dq})]\right)$$
+
+The final loss function used by Backprop by Bayes is $$\text{Loss}(\textbf{w}|D, \text{prior})=\frac{1}{2} \sum_{i=1}^n\left(\frac{\left(x_i-\hat{x}_i\right)^2}{\sigma_{\epsilon}^2}+2 \ln \sigma_{\epsilon}\right) + \beta \cdot \sum_{i=0}^dKL\left(q(w_i)||p(w_i)\right)$$
+
+Now we derive the closed-form of the $$KL(q(w)||p(w))$$ regardless of index $i$ without loss of generalization in the loss function.
+$$
+\begin{aligned}
+KL(q(w)||p(w)) &= \mathbb{E}_{w \sim q}[\log q(w)-\log p(w)]\\
+\log q(\omega) & =-\frac{1}{2}\left[\log \left(2 \pi \sigma_q^2\right)+\frac{\left(\omega-\mu_q\right)^2}{\sigma_q^2}\right] \\
+\log p(\omega) & =-\frac{1}{2}\left[\log \left(2 \pi \sigma_p^2\right)+\frac{\left(\omega-\mu_p\right)^2}{\sigma_p^2}\right] \\
+E_q\left(\omega-\mu_q\right)^2 & =\sigma_q^2 \\
+E_q\left(\omega-\mu_p\right)^2 & =E_q\left(\omega-\mu_q+\mu_q-\mu_p\right)^2 \\
+& =E_q\left(\omega-\mu_q\right)^2+2\left(\omega-\mu_q\right)\left(\mu_q-\mu_p\right)+\left(\mu_q-\mu_p\right)^2 \\
+& =\sigma_q^2+\left(\mu_q-\mu_p\right)^2 \\
+K L(q \| p) & =-\frac{1}{2} \log \left(2 \pi \sigma_q^2\right)+1 \cdot\left(-\frac{1}{2}\right)+\frac{1}{2} \log \left(2 \pi \sigma_p^2\right)+\frac{1}{2 \sigma_p^2} \cdot\left[\sigma_q^2+\left(\mu_q-\mu_p\right)\right] \\
+& =\frac{1}{2} \cdot \log \frac{\sigma_p^2}{\sigma_q^2}+\frac{\sigma_q^2+\left(\mu_q-\mu_p\right)^2}{2 \sigma_p^2}-\frac{1}{2} \\
+& =\log \frac{\sigma_p}{\sigma_q}+\frac{\sigma_q^2+\left(\mu_q-\mu_p\right)^2}{2 \sigma_p^2}-\frac{1}{2}
+\end{aligned}
+$$
 
 \end{document}
