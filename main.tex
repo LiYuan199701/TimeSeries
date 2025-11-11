@@ -43,14 +43,24 @@
 
 \maketitle
 
-\section{Introduction}
+\section{Introduction – Diagonal Covariance Prior}
 
-Given a scaler time series $x_1, x_2, \dots, x_d$, we want to build a single perceptron Bayesian time series model to predict $x_{d+1}$ and generate the uncertainty for this prediction. $$x_{d+1} = f\left(\sum_{i=1}^dw_i x_i + w_0\right) + \epsilon_{d+1}$$ where $f$ is the activation function and $\mathbf{w}=(w_0,w_1,w_2,\cdots, w_d)$ is the weight vector of this perceptron, $\epsilon \sim N(0, \sigma^2_\epsilon)$ . Sometimes $w_0$ is called bias term. Now we assign a normal distribution as a prior for the weight vector. The prior is $$p(\mathbf{w})\sim N\left([\mu_{1p},\mu_{2p},\cdots,\mu_{2p}], \text{diag}(\sigma_{1p}, \sigma_{2p}, \cdots,\sigma_{dp})]\right)$$
+Given a scaler time series $x_1, x_2, \dots, x_d, x_{d+1}, \dots, x_n$, we want to build a single perceptron Bayesian time series model to predict next step value $x_{d+1}$ by the previous d steps $x_1, \dots, x_d$ values and provide the uncertainty level for this prediction. $$x_{d+1} = f\left(\sum_{i=1}^dw_i x_i + w_0\right) + \epsilon_{d+1}$$ where $f$ is the activation function and $\mathbf{w}=(w_0,w_1,w_2,\cdots, w_d)$ is the weight vector of this perceptron, $\epsilon \sim N(0, \sigma^2_\epsilon)$ is the assumed normal white noise term. Sometimes $w_0$ is called bias term. Now we assign a normal distribution as a prior for the weight vector. The prior is 
+$$ p(\mathbf{w})\sim N\left(\begin{pmatrix}
+    \mu_{1p} \\ \mu_{2p} \\ \cdots \\ \mu_{dp}
+\end{pmatrix}, 
+\begin{pmatrix}
+\sigma_{1p}^2 & 0 & \cdots & 0 \\
+0 & \sigma_{2p}^2 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & \sigma_{dp}^2
+\end{pmatrix}
+\right) $$
 Now we are trying the recency decay prior mean as $$\mu_k = c\cdot e^{-\lambda(d-k)}$$ where $c$ is a scaling constant, and $\lambda$ controls the exponential decay. So far we assume all $\sigma_k$ from the prior distribution is the same, $\sigma_k = 0.5$ and each weight distribution is independent.
 
 We use the Bayesian Variational Inference to approximate the true posterior distribution with a normal distribution $$q(\mathbf{w})\sim N\left([\mu_{1q},\mu_{2q},\cdots,\mu_{dq}], \text{diag}(\sigma_{1q}, \sigma_{2q}, \cdots,\sigma_{dq})]\right)$$
 
-The final loss function used by Backprop by Bayes is $$\text{Loss}(\textbf{w}|D, \text{prior})=\frac{1}{2} \sum_{i=1}^n\left(\frac{\left(x_i-\hat{x}_i\right)^2}{\sigma_{\epsilon}^2}+2 \ln \sigma_{\epsilon}\right) + \beta \cdot \sum_{i=0}^dKL\left(q(w_i)||p(w_i)\right)$$
+The final loss function used by Backprop by Bayes is $$\text{Loss}(\textbf{w}|D, \text{prior})=\frac{1}{2} \sum_{i=d+1}^n\left(\frac{\left(x_i-\hat{x}_i\right)^2}{\sigma_{\epsilon}^2}+2 \ln \sigma_{\epsilon}\right) + \beta \cdot \sum_{i=0}^dKL\left(q(w_i)||p(w_i)\right)$$
 
 Now we derive the closed-form of the $$KL(q(w)||p(w))$$ regardless of index $i$ without loss of generalization in the loss function.
 $$
@@ -67,5 +77,109 @@ K L(q \| p) & =-\frac{1}{2} \log \left(2 \pi \sigma_q^2\right)+1 \cdot\left(-\fr
 & =\log \frac{\sigma_p}{\sigma_q}+\frac{\sigma_q^2+\left(\mu_q-\mu_p\right)^2}{2 \sigma_p^2}-\frac{1}{2}
 \end{aligned}
 $$
+
+\section{Multivariate Tri-Diagonal Normal Prior}
+In the previous section, we assume each weight is independent of each other, so the covariance matrix of this specified prior is a diagonal matrix. Now we want to build a more informative prior where two timestamps right next to each other have correlations. The mean decay is still the same as before $$\mu_k = c\cdot e^{-\lambda (d-k)}, \;k \;\;\text{is timestamp index},$$ but the covariance matrix would be tri-diagonal, only adjacent correlations: $$\Sigma_0=\left[\begin{array}{cccc}
+\tau_1^2 & \rho_1 \tau_1 \tau_2 & 0 & 0 \\
+\rho_1 \tau_1 \tau_2 & \tau_2^2 & \rho_2 \tau_2 \tau_3 & 0 \\
+0 & \rho_2 \tau_2 \tau_3 & \tau_3^2 & \rho_3 \tau_3 \tau_4 \\
+0 & 0 & \rho_3 \tau_3 \tau_4 & \tau_4^2
+\end{array}\right]$$ where $\tau_k=\tau_0 e^{\gamma(d-k)}(\gamma>0), \quad \rho_k \in(-1,1)$ when we choose $d=4$. The variance decreases with $k$. The design principle is that further timestamp variance would be larger than the closer timestamp variance to the prediction one. The bigger the variance it is, the more non-informative the timestamp is. As a result, we have $\tau_1>\tau_2>\tau_3>\tau_4$. For simplicity, we can use either a single $\rho$ or $\rho_k=\rho e^{-\delta(d-k)}$ when the distant pairs have weaker correlations. 
+
+After specifying all of these, we boil down to the The Evidence Lower Bound (ELBO) and cost function: $$\mathcal{L}(\bar{\theta},D(\mathbf{x},\mathbf{y}))=\mathrm{KL}(q(\mathbf{w}|\bar{\theta}) \| p(\mathbf{w})) - \mathbb{E}_{q(\mathbf{w}|\bar{\theta})}[\log p(\mathbf{y} \mid \mathbf{w}, \mathbf{x})]$$ where $\bar{\theta}$ is the whole approximated posterior parameters. 
+
+Now we need to derive into mathematical formula for KL term in a multivariate form as follows: 
+$$\mathrm{KL}(q(\mathbf{w}|\bar{\theta}) \| p(\mathbf{w}))=E_{w\sim q}[\text{log}q(w)-\text{log}p(w)]$$
+$$\begin{aligned}
+& p(\omega)=\frac{1}{(2 \pi)^{\frac{d}{2}} \cdot  \left|\Sigma_p\right|^{\frac{1}{2}}} \cdot \exp \left\{-\frac{1}{2}\left(\omega-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_p\right)\right\} \\
+& q(\omega)=\frac{1}{(2 \pi)^{\frac{d}{2}} \cdot\left|\Sigma_q\right|^{\frac{1}{2}}} \cdot \exp \left\{-\frac{1}{2}\left(\omega-\mu_q\right)^{\top} \Sigma_q^{-1}\left(\omega-\mu_q\right)\right\} \\
+& K L(q(\omega) \| p(\omega))=E_{\omega\sim q(\omega)}[\log q(\omega)-\log p(\omega)] \\
+& \log q(\omega)=-\frac{d}{2} \log 2 \pi-\frac{1}{2} \log \left|\Sigma_q\right|-\frac{1}{2}\left(\omega-\mu_q\right)^{\top} \Sigma_q^{-1}\left(\omega-\mu_q\right) \\
+& \log p(\omega)=-\frac{d}{2} \log 2 \pi-\frac{1}{2} \log |\Sigma_p|-\frac{1}{2}\left(\omega-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_p\right) \\
+& \begin{aligned}
+E\left(\left(\omega-\mu_q\right)^{\top} \Sigma_q^{-1}\left(\omega-\mu_q\right)\right)= & d,\;\; \text{because the variable} \left(\omega-\mu_q\right)^{\top} \Sigma_q^{-1}\left(\omega-\mu_q\right) \sim \chi^2_d \\
+E\left(\left(\omega-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_p\right)\right)= & E\left\{\left(\omega-\mu_q+\mu_q-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_q+\mu_q-\mu_p\right)\right\} \\
+= & E\left\{\left(\omega-\mu_q\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_q\right)\right. \\
+& \left(\mu_q-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\mu_q-\mu_p\right) \\
+& \left(\omega-\mu_q\right)^{\top} \Sigma_p^{-1}\left(\mu_q-\mu_p\right) \\
+& \left.\left(\mu_q-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_q\right)\right\} \\
+= & \left(\mu_q-\mu_p\right)^{\top} \Sigma_p^{-1}\left(\mu_q-\mu_p\right) 
++  E\left(\left(\omega-\mu_q\right)^{\top} \Sigma_p^{-1}\left(\omega-\mu_q\right)\right)
+\end{aligned}
+\end{aligned}
+$$
+
+For the second term in the last equation above, we have 
+$$\begin{aligned}
+& Y=W-\mu_q \sim N\left(0, \Sigma_q\right) \\
+& Z=\Sigma_p^{-\frac{1}{2}} Y \sim N\left(0, \Sigma_p^{-\frac{1}{2}} \cdot \Sigma_q \cdot\left(\Sigma_p^{-\frac{1}{2}}\right)^{\top}\right) \\
+& Y^{\top} \Sigma_p^{-1} Y=Y^{\top} \cdot \Sigma_p^{-\frac{1}{2}} \cdot \Sigma_p^{-\frac{1}{2}} \cdot Y \\
+& =Z^{\top} Z \\
+E(Z^TZ)&= E\left(\sum_{i=1}^d Z_i^2\right)\\
+&= \sum_{i=1}^d E(Z_i^2)\\
+&= \mathbf{Tr}(E(ZZ^T))\\
+&= \mathbf{Tr}(Cov(Z))\\
+&= \mathbf{Tr}\left(\Sigma_p^{-\frac{1}{2}} \cdot \Sigma_q \cdot\left(\Sigma_p^{-\frac{1}{2}}\right)^{\top}\right)\\
+&= \mathbf{Tr}\left(\Sigma_p^{-\frac{1}{2}}\cdot\Sigma_p^{-\frac{1}{2}}\cdot\Sigma_q\right)\\
+&= \mathbf{Tr}\left(\Sigma_p^{-1}\cdot\Sigma_q\right)
+\end{aligned}$$
+So the final closed-form KL term would be 
+$$\mathrm{KL}(q \| p)=\frac{1}{2}\left[\log \frac{\left|\Sigma_p\right|}{\left|\Sigma_q\right|}-d+\operatorname{Tr}\left(\Sigma_p^{-1} \Sigma_q\right)+\left(\mu_p-\mu_q\right)^{\top} \Sigma_p^{-1}\left(\mu_p-\mu_q\right)\right]$$
+
+\section{Two-Level Variational Bayesian Single-Perceptron model}
+
+Now we introduce the two-level variational Bayesian single perceptron time series model. This model is based on the previous model design. However, this model design specifies the structure of the prior mean and variance of the normal distribution instead of directly assigning values to them by humans. We use the exponential decay structure for prior mean and variance as lags increase. This new two-level hierarchical Bayesian model looks like as follows:
+
+1. Level 1 (Data|likelihood):
+$$y_t \mid \mathbf{w}, b, \sigma_{\varepsilon}^2 \sim \mathcal{N}\left(\tanh \left(\mathbf{x}_t^{\top} \mathbf{w}+b\right), \sigma_{\varepsilon}^2\right)$$
+
+2. Level 2 (Prior Weights):
+$$w_k \mid c, \lambda, \tau, \gamma \sim \mathcal{N}\left(c e^{-\lambda(d-k)},\left(\tau e^{\gamma(d-k)}\right)^2\right)$$
+where $c$ is the amplitude of the prior mean; $\lambda$ is the rate of mean decay; $\tau$ is the base scale of weight variance; $\gamma$ is the how fast variance grows for older lags. Overall, $c$ and $\lambda$ control signal strength and memory decay while $\tau$ and $\gamma$ control uncertainty about recency: older lags have broader priors. Here, we assume that $y_t$ follows a normal distribution with those parameters, so we can use a common log-likelihood function in the loss. However, this assumption can be relaxed to a distribution agonistic. This suggests we directly build the model on the expectation of $y_t$: $$E(y_t\mid \mathbf{w}, b, \sigma_{\varepsilon}^2)=f\left(\mathbf{x}_t^{\top} \mathbf{w}+b\right)$$ where $f$ can also be any non-linear activation function in light of real data. The difference between having a normal assumption on the data and not having one is that the model with a normal assumption on the data can have both a posterior predictive interval for observations and a posterior mean interval for expectations, while the model without a normal assumption can only have a posterior mean interval. The posterior predictive interval would be produced by $$y_{\text {new }}=f\left(x_{\text {new }}\mid \mathbf{w}, Data\right)+\text { noise }$$ when noise is either known or learned by the model. The posterior mean interval is calculated by the $$E(y_{new})=f\left(x_{\text {new }}\mid \mathbf{w}, Data\right)$$. With this structure being said, the posterior predictive interval would be wider than the posterior mean interval.
+
+The first way of training this model is Empirical Bayes, where we treat $c$, $\lambda$, $\tau$, and $\gamma$ as deterministic, learnable parameters (like weights in a neural network) that are optimized directly by gradient ascent in the ELBO. The ELBO function that we want to maximize would be 
+$$\mathcal{L}\left(c, \lambda, \theta_q\right)=\mathbb{E}_{q(\mathbf{w})}[\log p(y \mid \mathbf{w})]-\mathrm{KL}(q(\mathbf{w}) \| p(\mathbf{w} \mid c, \lambda, \tau, \gamma))$$ where $q(\mathbf{w})$ is the posterior approximated normal distribution used to form the weight distribution for $\hat{y}$, and $p(\mathbf{w} \mid c, \lambda, \tau, \gamma)$ is prior normal distribution for weights. As we can observe, this empirical Bayesian estimation method would train posterior weights to learn the data by minimizing the loss function, while imposing an exponential decay structure on the posterior weights similar to the prior distribution.
+
+The BackProp by Bayes would take gradient ascent update: $$c \leftarrow c + \eta_c \cdot\frac{\partial \mathcal{L}}{\partial c}, \quad \lambda \leftarrow \lambda + \eta_{\lambda} \cdot\frac{\partial \mathcal{L}}{\partial \lambda},\quad \tau \leftarrow \tau + \eta_{\tau} \cdot\frac{\partial \mathcal{L}}{\partial \tau},\quad \gamma \leftarrow \gamma + \eta_{\gamma} \cdot\frac{\partial \mathcal{L}}{\partial \gamma}$$ inside the $\mathcal{L}(s, \lambda, \theta_q)$ ELBO function during training. In this way, the model is learning the 'best-fit' prior shape from the data. This is why this method is called "Empirical Bayes" because the priors' assumed hyper-parameters are learned from the data itself instead of being determined by human or other sources. 
+
+\section{Autoregressive weight Bayesian Neural Autoregression Model}
+Now we introduce a new model design where the weights themselves are correlated across lags, which imposes temporal smoothness and correlation between weights of adjacent lags. The essential feature of this model is that we want to impose an AR(1) prior on weights $w=(w_1, w_2, \cdots, w_d)^T$. The model imposes a normal AR(1) prior on the sequence of weights: $$\begin{aligned}
+    w_1 &\sim N(\mu_1, \sigma_1^2) \\
+    w_k|w_{k-1} &\sim N(\phi w_{k-1},\sigma_w^2), k=2,3\cdots,d
+\end{aligned}$$ where the learnable $\phi$ determines strength of autocorrelation among lag weights. If it's close to 1, it shows the weights next to each other have a strong correlation, vice versa.
+The joint distribution of all weights is a multivariate normal distribution:
+$$p(w)=\mathcal{N}\left(w \mid \mu_p, \Sigma_p\right)$$
+where $\mu_{p, k}=\mu_0 \phi^k, \quad \Sigma_p[i, j]=\phi^{|i-j|} \operatorname{Var}\left(w_{\min }(i, j)\right),$ and 
+$$\operatorname{Var}\left(w_k\right)=\phi^{2 k} \sigma_0^2+\frac{\sigma_w^2\left(1-\phi^{2 k}\right)}{1-\phi^2}$$
+
+The quick and simple derivation of this joint distribution:
+Take the expectation iteratively:
+$$\begin{aligned}
+\mathbb{E}\left[w_0\right] & =\mu_0, \\
+\mathbb{E}\left[w_1\right] & =\phi \mu_0, \\
+\mathbb{E}\left[w_2\right] & =\phi^2 \mu_0, \\
+\vdots & \\
+\mathbb{E}\left[w_k\right] & =\phi^k \mu_0 ,\\
+\mu_p&=\mu_0\left[1, \phi, \phi^2, \ldots, \phi^{d-1}\right]^{\top}
+\end{aligned}\\
+$$
+
+As usual, we use an approximated normal as the posterior distribution over the posterior weights: $$q(w)=\mathcal{N}\left(w \mid m_w, \operatorname{diag}\left(s_w^2\right)\right)$$ where $m_w$ and $\log s_w$ are learnable parameters. We treat the bias term as deterministic in this model. 
+
+Given the variational posterior weights $w$ and the deterministic bias $b$, we can model the likelihood function of observed predictions as follows:
+$$p\left(y_t \mid X_t, w, b, \sigma_{\varepsilon}\right)=\mathcal{N}\left(y_t \mid f \left(X_t^{\top} w+b\right), \sigma_{\varepsilon}^2\right)$$ where $y_t$ is the predicted next step value $x_{t}$ and $X_t$ is the vector of past d step values $(x_{t-1}, x_{t-2},\cdots, x_{d-1})$ in this time series; $f$ is the nonlinear activation function such as tanh to model the nonlinearity of the time series; $\sigma_{\varepsilon}^2$ is the observational noise for the prediction given the normal assumption of the expectation. 
+
+In Bayesian Variational Inference, we need to build the Evidence Lower Bound (ELBO) to maximize: $$\mathcal{L}_{\mathrm{ELBO}}=\mathbb{E}_{q(w)}[\log p(y \mid X, w)]-\operatorname{KL}(q(w) \| p(w))$$
+
+Regarding the KL term, $q(w)$ is a diagonal normal distribution where we assume the independent weight distribution in the posterior (we can change it to a full matrix learning later), $p(w)$ has a normal AR(1) structure, covariance matrix $\Sigma_p$. As a result, we have the closed-form KL term as follows:
+$$\mathrm{KL}(q(w) \| p(w))=\frac{1}{2}\left[\operatorname{tr}\left(\Sigma_p^{-1} \Sigma_q\right)+\left(\mu_p-m_w\right)^{\top} \Sigma_p^{-1}\left(\mu_p-m_w\right)-d+\log \frac{\left|\Sigma_p\right|}{\left|\Sigma_q\right|}\right]$$ where $\Sigma_q=\operatorname{diag}\left(s_w^2\right), \text { and }\left|\Sigma_q\right|=\prod_i s_{w, i}^2=\exp \left(\sum_i \log s_{w, i}^2\right)$
+
+We did a simple simulation on a non-linear, bounded time series within $[-1,1]$ using this method. The following figure \ref{fig:AR1BNAR} is the prediction, actual value, and uncertainty band on the test set. 
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=1\linewidth]{img/AR1BNAR.png}
+    \caption{Prediction and Uncertainty on a simulation time series}
+    \label{fig:AR1BNAR}
+\end{figure}
 
 \end{document}
