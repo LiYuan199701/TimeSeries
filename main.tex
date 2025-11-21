@@ -140,46 +140,294 @@ where $c$ is the amplitude of the prior mean; $\lambda$ is the rate of mean deca
 The first way of training this model is Empirical Bayes, where we treat $c$, $\lambda$, $\tau$, and $\gamma$ as deterministic, learnable parameters (like weights in a neural network) that are optimized directly by gradient ascent in the ELBO. The ELBO function that we want to maximize would be 
 $$\mathcal{L}\left(c, \lambda, \theta_q\right)=\mathbb{E}_{q(\mathbf{w})}[\log p(y \mid \mathbf{w})]-\mathrm{KL}(q(\mathbf{w}) \| p(\mathbf{w} \mid c, \lambda, \tau, \gamma))$$ where $q(\mathbf{w})$ is the posterior approximated normal distribution used to form the weight distribution for $\hat{y}$, and $p(\mathbf{w} \mid c, \lambda, \tau, \gamma)$ is prior normal distribution for weights. As we can observe, this empirical Bayesian estimation method would train posterior weights to learn the data by minimizing the loss function, while imposing an exponential decay structure on the posterior weights similar to the prior distribution.
 
-The BackProp by Bayes would take gradient ascent update: $$c \leftarrow c + \eta_c \cdot\frac{\partial \mathcal{L}}{\partial c}, \quad \lambda \leftarrow \lambda + \eta_{\lambda} \cdot\frac{\partial \mathcal{L}}{\partial \lambda},\quad \tau \leftarrow \tau + \eta_{\tau} \cdot\frac{\partial \mathcal{L}}{\partial \tau},\quad \gamma \leftarrow \gamma + \eta_{\gamma} \cdot\frac{\partial \mathcal{L}}{\partial \gamma}$$ inside the $\mathcal{L}(s, \lambda, \theta_q)$ ELBO function during training. In this way, the model is learning the 'best-fit' prior shape from the data. This is why this method is called "Empirical Bayes" because the priors' assumed hyper-parameters are learned from the data itself instead of being determined by human or other sources. 
+The BackProp by Bayes would take gradient ascent update: $$c \leftarrow c + \eta_c \cdot\frac{\partial \mathcal{L}}{\partial c}, \quad \lambda \leftarrow \lambda + \eta_{\lambda} \cdot\frac{\partial \mathcal{L}}{\partial \lambda},\quad \tau \leftarrow \tau + \eta_{\tau} \cdot\frac{\partial \mathcal{L}}{\partial \tau},\quad \gamma \leftarrow \gamma + \eta_{\gamma} \cdot\frac{\partial \mathcal{L}}{\partial \gamma}$$ inside the $\mathcal{L}(s, \lambda, \theta_q)$ ELBO function during training. In this way, the model is learning the 'best-fit' prior shape from the data. This is why this method is called "Empirical Bayes," because the priors' assumed hyperparameters are learned from the data itself instead of being determined by humans or other sources. 
 
 \section{Autoregressive weight Bayesian Neural Autoregression Model}
-Now we introduce a new model design where the weights themselves are correlated across lags, which imposes temporal smoothness and correlation between weights of adjacent lags. The essential feature of this model is that we want to impose an AR(1) prior on weights $w=(w_1, w_2, \cdots, w_d)^T$. The model imposes a normal AR(1) prior on the sequence of weights: $$\begin{aligned}
+Now we introduce a new model design in which the weights themselves are correlated across lags, imposing temporal smoothness and correlation between adjacent lags' weights. The essential feature of this model is that we want to impose an AR(1) prior on weights $w=(w_1, w_2, \cdots, w_d)^T$. The model imposes a normal AR(1) prior on the sequence of weights: $$\begin{aligned}
     w_1 &\sim N(\mu_1, \sigma_1^2) \\
     w_k|w_{k-1} &\sim N(\phi w_{k-1},\sigma_w^2), k=2,3\cdots,d
-\end{aligned}$$ where the learnable $\phi$ determines strength of autocorrelation among lag weights. If it's close to 1, it shows the weights next to each other have a strong correlation, vice versa.
+\end{aligned}$$ where the learnable $\phi$ determines strength of autocorrelation among lag weights. We want $|\phi|<1$ so that the most recent lag weight has higher influence than the past lag weight. If it's close to 1, it shows the weights next to each other have a strong correlation; vice versa.
 The joint distribution of all weights is a multivariate normal distribution:
 $$p(w)=\mathcal{N}\left(w \mid \mu_p, \Sigma_p\right)$$
-where $\mu_{p, k}=\mu_0 \phi^k, \quad \Sigma_p[i, j]=\phi^{|i-j|} \operatorname{Var}\left(w_{\min }(i, j)\right),$ and 
-$$\operatorname{Var}\left(w_k\right)=\phi^{2 k} \sigma_0^2+\frac{\sigma_w^2\left(1-\phi^{2 k}\right)}{1-\phi^2}$$
+where $\mu_{p, k}=\mu_1 \phi^k, \quad \Sigma_p[i, j]=\phi^{|i-j|} \operatorname{Var}\left(w_{\min }(i, j)\right),$ and 
+$$\operatorname{Var}\left(w_k\right)=\phi^{2 k-2} \sigma_1^2+\frac{\sigma_w^2\left(1-\phi^{2 k-2}\right)}{1-\phi^2}$$
 
-The quick and simple derivation of this joint distribution:
-Take the expectation iteratively:
+We give a simple proof of why this joint distribution of weights is multivariate normal with a linear transformation as follows:
 $$\begin{aligned}
-\mathbb{E}\left[w_0\right] & =\mu_0, \\
-\mathbb{E}\left[w_1\right] & =\phi \mu_0, \\
-\mathbb{E}\left[w_2\right] & =\phi^2 \mu_0, \\
+    w_k &= \phi w_{k-1}+\epsilon_w\\
+    \begin{pmatrix}
+        w_{k-1} \\
+        w_k
+    \end{pmatrix}&= 
+    \begin{pmatrix}
+        1 & 0\\
+        \phi & 1
+    \end{pmatrix}
+    \begin{pmatrix}
+        w_{k-1}\\
+        \epsilon_w
+    \end{pmatrix}
+\end{aligned}$$
+Because the $w_{k-1}$ is independent of $\epsilon_w$, the joint distribution of $(w_{k-1},\epsilon_w)$ is a bi-variate normal distribution naturally. Thus, as we know, the linear transformation of a multivariate normal distribution remains normal. By applying a recursive linear transformation to this relationship, the entire weight is a normal too.  
+
+The quick and simple derivation of this joint distribution is to take the expectation iteratively by the law of total expectation:
+$$\begin{aligned}
+\mathbb{E}\left[w_1\right] & =\mu_1, \\
+\mathbb{E}\left[w_2\right] & = E[E(w_2|w_1)]=E(\phi w_{1})=\phi \mu_1, \\
+\mathbb{E}\left[w_3\right] & = E[E(w_3|w_2)]=E(\phi w_{2})=\phi^2 \mu_1, \\
 \vdots & \\
-\mathbb{E}\left[w_k\right] & =\phi^k \mu_0 ,\\
-\mu_p&=\mu_0\left[1, \phi, \phi^2, \ldots, \phi^{d-1}\right]^{\top}
+\mathbb{E}\left[w_d\right] & = E[E(w_d|w_{d-1})]=E(\phi w_{d-1})= \phi^{d-1} \mu_1 ,\\
+\mu_p&=\mu_1\left[1, \phi, \phi^2, \ldots, \phi^{d-1}\right]^{\top}
 \end{aligned}\\
 $$
+In terms of joint variance, by the law of total variance, we have:
+$$\begin{aligned}
+    Var(w_1) &= \sigma_1^2 \\
+    Var(w_2) &= E(Var(w_2|w_1)) + Var(E(w_2|w_1)) = E(\sigma^2_w)+Var(\phi w_1)=\sigma^2_w+\phi^2 \sigma^2_1 \\
+    Var(w_3) &= E(Var(w_3|w_2)) + Var(E(w_3|w_2)) = E(\sigma^2_w)+Var(\phi w_2)=\sigma^2_w+\phi^2 (\sigma^2_w+\phi^2 \sigma^2_1)=(1+\phi^2)\sigma^2_w + \phi^4\sigma^2_1 \\
+    Var(w_4) &= E(Var(w_4|w_3)) + Var(E(w_4|w_3)) = E(\sigma^2_w)+Var(\phi w_3)=(1+\phi^2+\phi^4)\sigma^2_w + \phi^6\sigma^2_1 \\
+    &\vdots \\
+    Var(w_d) &= E(Var(w_d|w_{d-1})) + Var(E(w_d|w_{d-1})) = E(\sigma^2_w)+Var(\phi w_{d-1})=(1+\phi^2+\phi^4+\cdots+\phi^{2(d-2)})\sigma^2_w + \phi^{2(d-1)}\sigma^2_1\\
+    &= \frac{1-(\phi^2)^{d-1}}{1-\phi^2}\cdot \sigma_w^2 + \phi^{2(d-1)}\cdot\sigma_1^2
+\end{aligned}$$
+If $d$ goes to infinity theoretically, $\phi^{2(d-1)}$ goes to zero, then we have: $$Var(w_d) \xrightarrow{d\rightarrow\infty} \frac{\sigma_w^2}{1-\phi^2}$$ 
+Then we have stationary distributed weights that are far away from the prediction step:
+$$w_d \xrightarrow{d\rightarrow\infty} N\left(0, \frac{\sigma_w^2}{1-\phi^2}\right)$$
+
+Next, we compute the covariance between prior weights recursively as follows:
+$$\begin{aligned}
+    Cov(w_1, w_1) &= Var(w_1) = \sigma^2_1 \\
+    Cov(w_2,w_1) &= Cov(\phi w_1+\epsilon_w, w_1)=Cov(\phi w_1, w_1)+Cov(\epsilon_w,w_1)= \phi Var(w_1)= \phi \sigma_1^2 \\
+    Cov(w_3, w_2) &= Cov(\phi w_2 + \epsilon_w, w_2) = \phi Var(w_2)=\phi(\sigma^2_w + \phi^2\sigma_1^2)\\
+    Cov(w_4, w_3) &= Cov(\phi w_3 + \epsilon_w, w_3) = \phi Var(w_3)=\phi((1+\phi^2)\sigma^2_w + \phi^4\sigma_1^2)\\
+    Cov(w_4, w_1) &= Cov(\phi w_3 + \epsilon_w, w_1)= \phi Cov(w_3, w_1) = \phi Cov(\phi w_2+\epsilon,w_1)=\phi^2Cov(w_2,w_1)=\phi^3Var(w_1) \\
+    &\vdots \\
+    Cov(w_i, w_j) &= Cov(\phi w_{i-1}+\epsilon_w, w_j)= \phi Cov(w_{i-1},w_j)=\cdots=\phi^{i-j}Var(w_j)\; \textbf{when}\; i> j\\
+    Cov(w_j, w_i) &= Cov(w_j, \phi w_{i-1}+\epsilon_w) = \phi Cov(w_j, w_{i-1})=\cdots = \phi^{i-j}Var(w_j)\;\textbf{when}\; i>j\\
+    \mathbf{\Sigma(i,j)} &= \phi^{|i-j|}\cdot\left( \frac{1-(\phi^2)^{min(i,j)-1}}{1-\phi^2}\cdot \sigma_w^2 + \phi^{2(min(i,j)-1)}\cdot\sigma_1^2\right)\;\textbf{when}\; i,j\in \{1,2,\cdots,d\}
+\end{aligned}$$
+This gives the calculations for each cell of this prior weight covariance matrix.
 
 As usual, we use an approximated normal as the posterior distribution over the posterior weights: $$q(w)=\mathcal{N}\left(w \mid m_w, \operatorname{diag}\left(s_w^2\right)\right)$$ where $m_w$ and $\log s_w$ are learnable parameters. We treat the bias term as deterministic in this model. 
 
 Given the variational posterior weights $w$ and the deterministic bias $b$, we can model the likelihood function of observed predictions as follows:
-$$p\left(y_t \mid X_t, w, b, \sigma_{\varepsilon}\right)=\mathcal{N}\left(y_t \mid f \left(X_t^{\top} w+b\right), \sigma_{\varepsilon}^2\right)$$ where $y_t$ is the predicted next step value $x_{t}$ and $X_t$ is the vector of past d step values $(x_{t-1}, x_{t-2},\cdots, x_{d-1})$ in this time series; $f$ is the nonlinear activation function such as tanh to model the nonlinearity of the time series; $\sigma_{\varepsilon}^2$ is the observational noise for the prediction given the normal assumption of the expectation. 
+$$p\left(y_t \mid X_t, w, b, \sigma_{\varepsilon}\right)=\mathcal{N}\left(y_t \mid f \left(X_t^{\top} w+b\right), \sigma_{\varepsilon}^2\right),\;\; X_t^Tw = x_{t-1}*w_1+x_{t-2}*w_2+\cdots+x_{t-d}*w_d$$ where $y_t$ is the predicted next step value $x_{t}$ and $X_t$ is the vector of past d step values $(x_{t-1}, x_{t-2},\cdots, x_{d-1})$ in this time series; $f$ is the nonlinear activation function such as tanh to model the nonlinearity of the time series; $\sigma_{\varepsilon}^2$ is the observational noise for the prediction given the normal assumption of the expectation. 
 
 In Bayesian Variational Inference, we need to build the Evidence Lower Bound (ELBO) to maximize: $$\mathcal{L}_{\mathrm{ELBO}}=\mathbb{E}_{q(w)}[\log p(y \mid X, w)]-\operatorname{KL}(q(w) \| p(w))$$
 
 Regarding the KL term, $q(w)$ is a diagonal normal distribution where we assume the independent weight distribution in the posterior (we can change it to a full matrix learning later), $p(w)$ has a normal AR(1) structure, covariance matrix $\Sigma_p$. As a result, we have the closed-form KL term as follows:
-$$\mathrm{KL}(q(w) \| p(w))=\frac{1}{2}\left[\operatorname{tr}\left(\Sigma_p^{-1} \Sigma_q\right)+\left(\mu_p-m_w\right)^{\top} \Sigma_p^{-1}\left(\mu_p-m_w\right)-d+\log \frac{\left|\Sigma_p\right|}{\left|\Sigma_q\right|}\right]$$ where $\Sigma_q=\operatorname{diag}\left(s_w^2\right), \text { and }\left|\Sigma_q\right|=\prod_i s_{w, i}^2=\exp \left(\sum_i \log s_{w, i}^2\right)$
+\begin{equation}
+\mathrm{KL}\left(q(w)=N(\mu_p,\Sigma_p) \| p(w)=N(\mu_q,\Sigma_q)\right)=\frac{1}{2}\left[\operatorname{tr}\left(\Sigma_p^{-1} \Sigma_q\right)+\left(\mu_p-\mu_q\right)^{\top} \Sigma_p^{-1}\left(\mu_p-\mu_q\right)-d+\log \frac{\left|\Sigma_p\right|}{\left|\Sigma_q\right|}\right]
+\label{kl}
+\end{equation}
 
-We did a simple simulation on a non-linear, bounded time series within $[-1,1]$ using this method. The following figure \ref{fig:AR1BNAR} is the prediction, actual value, and uncertainty band on the test set. 
+where $\Sigma_q=\operatorname{diag}\left(s_w^2\right), \text { and }\log\left |\Sigma_q\right|=\log(\prod_{i=1}^d s_{w, i}^2)=\sum_{i=1}^d (2\log s_{w, i})$ when we simply assume the approximated posterior normal has a diagonal covariance matrix. However, we can also assume the full posterior covariance matrix. It depends on the lag step $d$ that we select to predict. If the selected $d$ is relative large such as 10, 20, the model has $\frac{d(d+1)}{2}$ parameters of variance to train, which means the size of training parameters of covariance matrix is $O(d^2)$ and the gradient computation would be roughly $O(d^3)$. In this case, assuming a diagonal covariance would reduce the training parameter size and speed up the running time for a large lag $d$.
+
+Now we discuss the algorithm how to implement this KL calculation for the simple diagonal covariance case. Even we assume the diagonal covariance matrix, we need to have a fast and numerically stable way to avoid the calculation of full inverse of the covariance matrix. We use the Cholesky factorization of a covariance matrix as follows:
+$$\begin{aligned}
+    \Sigma_p &= L_p\cdot L^T_p \\
+    \Sigma_p^{-1} &= L_p^{-T}\cdot L_p^{-1}
+\end{aligned}$$
+where $L_p$ is the real lower triangular matrix with positive diagonal entries when the prior covariance $\Sigma_p$ is symmetric positive definite. Because the prior covariance matrix is diagonal, we have the trace term to be:
+$$
+Tr(\Sigma_p^{-1}\cdot\Sigma_q)=\sum_{i=1}^{d} \left(\Sigma^{-1}_{ii,p}\cdot \Sigma_{ii,q}\right) =
+\sum_{i=1}^{d} \left(\left(\sum_{k=1}^d(L_p^{-1})^2_{ki} \right) \cdot \Sigma_{ii,q}\right)
+$$
+Then we need to calculate the quadratic term $(\mu_q-\mu_p)^T\cdot\Sigma_p^{-1}\cdot(\mu_q-\mu_p)$. Here the same rule applies that we don't want to directly calculate the full inverse which is expensive and unstable. We solve a system of two triangular linear equations:
+$$
+\begin{aligned}
+L_p y &=\left(\mu_q-\mu_p\right) \\
+L_p^{\top} x &= y
+\end{aligned}
+$$By solving this system, then we have:
+$$
+\begin{aligned}
+    L_P^Tx &= L_p^{-1}(\mu_q-\mu_p) = y\\
+    x &= L_P^{-T}L_P^{-1}(\mu_q-\mu_p) = \Sigma^{-1}_p(\mu_q-\mu_p)
+\end{aligned}
+$$
+After solving the $x$, we multiply $(\mu_q-\mu_p)^T\cdot x$ to get this quadratic term. 
+
+Lastly, we calculate the difference of log determinants as follows:
+$$
+\begin{aligned}
+    \log|\Sigma_p| &= \log\left(\prod_{i=1}^{d}L_{p,ii}\right)^2=2\left(\sum_{i=1}^{d}\log L_{p,ii}\right)\\
+    \log|\Sigma_q| &= \log \left(\prod_{i=1}^{d}s_i^2\right)=2\left(\sum_{i=1}^{d}s_i\right)\\
+    \log|\Sigma_p|-\log|\Sigma_q|&=2\left(\left(\sum_{i=1}^{d}\log L_{p,ii}\right)-\left(\sum_{i=1}^{d}s_i\right)\right)
+\end{aligned}
+$$
+After calculating each term in the KL divergence formula, we can plug them into the equation \ref{kl}. 
+
+The above calculation is for the simple case in which the prior covariance matrix is assumed to be diagonal. Now we calculate the KL term assuming the covariance matrix is full. Here, we use a trick to learn the posterior weight covariance. Suppose we directly train each entry of this posterior covariance with the neural network. In that case, the resulting matrix cannot be guaranteed to be a valid covariance matrix, since it must be symmetric and positive definite. The trick we use here is to train the Cholesky factorization $L_p$ directly, then multiply $L_p$ by $L_p^T$ to obtain the posterior covariance. For a covariance matrix to be valid, it must be symmetric and positive definite. Because we have: 
+$$
+(L_p\cdot L_p^T)^T = L_p \cdot L_p^T
+$$ This ensures the multiplication of $L_p$ is symmetrical. Next, we have to ensure that the diagonal of $L_p$ is all positive to obtain a full-rank $L_p$. For a lower triangular matrix $L_p$, the determinant of it is the product of its diagonal elements:
+$$
+\det(L_p) = \prod_{i=1}^d (L_{p,ii}) > 0 
+$$
+where all $L_{p,ii}$ is positive when we set up $L_{p,ii}= \exp^{\text{log of}\;L_{p,ii} }$. This $\log \text{of} \;L_{p,ii}$ is the training parameter in the neural network, which is unconstrained from negative infinity to positive infinity. The above exponential operation ensures all diagonal elements are positive. If the determinant of a matrix is positive, then this matrix is of full rank. As we know, if the matrix $L_p$ is of full rank, $L_p\cdot L_p^T$ is positive definite by the following way:
+for any non-zero vector $x$
+$$
+x^T\cdot (L_pL_p^T)\cdot x = (x^TL_p)\cdot (L_p^Tx) = (L_p^Tx)^T\cdot (L_p^Tx)= ||L^T_px||^2 > 0 
+$$
+when $x \neq 0$, then $L^T_px \neq 0$ and only when $x = 0$, we have $L_p^Tx=0$. This is guaranteed by the full rank matrix $L_p$. This is how we directly learn the lower-triangular Cholesky factor of the posterior covariance to ensure the covariance is valid by the backpropagation. We do the same Cholesky factorization for the prior covariance. First we calculate the Cholesky factorization of the prior covariance $L_p$, then calculate the inverse of $L_p$, lastly calculate the inverse of $\Sigma_p^{-1}=L_p^{-1}\cdot L_p^{-1}$ to avoid the direct calculation of the inverse of prior covariance. All other steps are computed directly by the equation \ref{kl}.
+
+We performed a simple simulation of a non-linear, bounded time series over $[-1,1]$ using this method of the lag $d = 4$ as follows:
+$$
+x_{t} = 0.7x_{t-1} - 0.3x_{t-2} + 0.2\sin(3x_{t-3}) + 0.05\cdot\epsilon
+$$
+The following figure \ref{fig:AR1BNAR} is the prediction, actual value, and uncertainty band on the test set with full posterior covariance. The figure \ref{fig:AR1BNAR} is the comparison between the posterior and prior weight distribution. 
 \begin{figure}[!ht]
-    \centering
-    \includegraphics[width=1\linewidth]{img/AR1BNAR.png}
-    \caption{Prediction and Uncertainty on a simulation time series}
-    \label{fig:AR1BNAR}
+        \centering
+        \includegraphics[width=1\linewidth]{img/AR1-BNAR-Sim_Test.png}
+        \caption{Prediction and Uncertainty on a simulation time series with a full covariance matrix}
+        \label{fig:AR1BNAR}
+    \end{figure}
+
+\subsection{Scale the data}
+We prefer to use the activation function tanh in the model, but it enforces output values between -1 and 1. So we have to first rescale the time series within -1 and 1, then apply our method to train. Finally, we invert the scaled data back to the original scale to visualize and measure.
+
+\subsection{Real Nonlinear Time Series}
+In this section, we introduce a few real-world nonlinear time series to test our method. The first one is the monthly U.S. unemployment rate in percent unemployed (Jan 1948 - Nov 2016, n = 827), the second one is the monthly pneumonia and influenza deaths per 10,000 people in the United States for 11 years, 1968 to 1978, the third one is the number of spots and groups of spots on the surface of the sun every year through a worldwide network of observing stations from 1700 to 2008 yearly in total 309 observations \cite{SILSO_Sunspot_Number}.
+
+\subsubsection{Unemployment Rate}
+The following graph \ref{fig:un} shows the model's predicted mean and its 95\% uncertainty level using $d=12$, split across the training, validation, and test sets, in three colors. The figure \ref{fig:post_un} shows the comparison of prior and posterior weights by each lag.
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/unemploy.png}
+        \caption{Prediction and Uncertainty on US unemployment rate}
+        \label{fig:un}
+\end{figure}
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/post_un.png}
+        \caption{Posterior vs Prior Distribution of AR(1) Weights on US unemployment rate}
+        \label{fig:post_un}
 \end{figure}
 
+\newpage
+
+\subsubsection{Flu Death}
+The following graph \ref{fig:flu} shows the model's predicted mean and its 95\% uncertainty level using $d=12$, split across the training, validation, and test sets, in three colors. The figure \ref{fig:post_flu} shows the comparison of prior and posterior weights by each lag.
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/flu.png}
+        \caption{Prediction and Uncertainty on Flu deaths per 10,000 people in the United States}
+        \label{fig:flu}
+\end{figure}
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/post_flu.png}
+        \caption{Posterior vs Prior Distribution of AR(1) Weights on Flu deaths per 10,000 people in the United States}
+        \label{fig:post_flu}
+\end{figure}
+
+\newpage
+
+\subsubsection{Sunspots}
+The following graph \ref{fig:sunspots} shows the model's predicted mean and its 95\% uncertainty level using $d=11$, split across the training, validation, and test sets, in three colors. The figure \ref{fig:sunspot_test} shows the comparison of prior and posterior weights by each lag.
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/sunspot.png}
+        \caption{Prediction and Uncertainty of the number of sunspots from 1700 to 2008}
+        \label{fig:sunspots}
+\end{figure}
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/sunspot_test.png}
+        \caption{Test Region of Sunspots}
+        \label{fig:sunspot_test}
+\end{figure}
+
+\newpage
+
+\subsection{Other simulation models}
+In this section, we test our method with some proposed simulation models by Wu, K. and Politis, D.N in 2024 \cite{https://doi.org/10.1111/jtsa.12739}.
+
+\subsubsection{Model 1}
+The model 1 formula is:
+$$X_t=\left(0.1 \cdot X_{t-1}\right) I\left(X_{t-1} \leq 0\right)+\left(0.8 \cdot X_{t-1}\right) I\left(X_{t-1}>0\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model1}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model1_test.png}
+        \caption{Test Region of Model 1}
+        \label{fig:model1}
+\end{figure}
+
+
+
+\subsubsection{Model 2}
+The model 2 formula is:
+$$X_t=\left(0.5 \cdot X_{t-1}+0.2 \cdot X_{t-2}+0.1 \cdot X_{t-3}\right) I\left(X_{t-1} \leq 0\right)+\left(0.8 X_{t-1}\right) I\left(X_{t-1}>0\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model2}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model2_test.png}
+        \caption{Test Region of Model 2}
+        \label{fig:model2}
+\end{figure}
+
+
+
+\subsubsection{Model 3}
+The model 3 formula is:
+$$X_t=\left(0.1 \cdot X_{t-1}+0.5 \cdot \mathrm{e}^{-X_{t-1}^2} \epsilon_t\right) I\left(X_{t-1} \leq 0\right)+\left(0.8 \cdot X_{t-1}+0.5 \cdot \mathrm{e}^{-X_{t-1}^2} \epsilon_t\right) I\left(X_{t-1}>0\right)$$
+The test region against the true values after training is \ref{fig:model3}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model3_test.png}
+        \caption{Test Region of Model 3}
+        \label{fig:model3}
+\end{figure}
+
+
+\subsubsection{Model 4}
+The model 4 formula is:
+$$X_t=0.2+\log \left(0.5+\left|X_{t-1}\right|\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model4}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model4_test.png}
+        \caption{Test Region of Model 4}
+        \label{fig:model4}
+\end{figure}
+
+
+\subsubsection{Model 5}
+The model 5 formula is:
+$$X_t=2 \cdot \log \left(X_{t-1}^2\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model5}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model5_test.png}
+        \caption{Test Region of Model 5}
+        \label{fig:model5}
+\end{figure}
+
+\newpage
+
+\subsubsection{Model 6}
+The model 6 formula is:
+$$X_t=\log \left(10+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model6}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model6_test.png}
+        \caption{Test Region of Model 6}
+        \label{fig:model6}
+\end{figure}
+
+\subsubsection{Model 7}
+The model 7 formula is:
+$$X_t=\log \left(4 \cdot \mathrm{e}^{0.9 \cdot X_{t-2}}+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}+6 \cdot \mathrm{e}^{0.9 \cdot X_{t-3}}\right)+\epsilon_t$$
+The test region against the true values after training is \ref{fig:model7}:
+\begin{figure}[!ht]
+        \centering
+        \includegraphics[width=1\linewidth]{img/model7_test.png}
+        \caption{Test Region of Model 7}
+        \label{fig:model7}
+\end{figure}
+
+\printbibliography
 \end{document}
