@@ -429,5 +429,33 @@ The test region against the true values after training is \ref{fig:model7}:
         \label{fig:model7}
 \end{figure}
 
+\section{Bayesian Nonlinear Expansion NAR Model}
+This section we introduce a new model called Bayesian Nonlinear Expansion Neural Auto-regression Time Series Model. The motivation of designing this model is to help the problems that happen in the last model when the previous model underestimates the high frequency vibration nonlinear time series. As we can observe from the simulation model 4, 5, 6, 7 and their modeled predicted mean, the predicted mean can barely capture the ups and downs of the underlying true time series. As we ponder, we found that all these simulation models have the logarithmic operation which can make a single tanh activation function of a linear combination of lagged time series hard to capture the real pattern. As a result, we think about adding the nonlinear transformations to the each lag including polynomial, absolute value, logarithmic, Fourier features to expand the basis. The essential model specification is for each lag, we take different nonlinear transformations to expand this single lag value into a vector as follows:
+$$
+\phi\left(x_{t-k}\right)=\left[\begin{array}{c}
+x_{t-k} \\
+x_{t-k}^2 \\
+\vdots \\
+x_{t-k}^P \\
+\left|x_{t-k}\right| \\
+\log \left(\left|X_{t-k}\right|\right) \\
+\sin \left(f_1 \pi X_{t-k}\right) \\
+\cos \left(f_1 \pi X_{t-k}\right) \\
+\vdots \\
+\sin \left(f_m \pi X_{t-k}\right) \\
+\cos \left(f_m \pi X_{t-k}\right)
+\end{array}\right]
+$$ where $P$ is the maximum number of polynomial degree, $f_1,\cdots,f_m$ are the Fourier frequency we select for the model. The full expansion of lag features is: 
+$$\Phi_t=\left[\begin{array}{c}
+\phi\left(X_{t-1}\right) \\
+\phi\left(X_{t-2}\right) \\
+\vdots \\
+\phi\left(X_{t-d}\right)
+\end{array}\right]$$
+After this lagged feature is built, we would have our model predicted mean as follows:
+$$
+x_t=f\left(\mathbf{w}^{\top} \Phi_t+b\right)
+$$ where $f$ is the activation function
+
 \printbibliography
 \end{document}
