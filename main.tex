@@ -1,4 +1,5 @@
 \documentclass{article}
+\usepackage{tikz} % For tikzpicture environment
 \usepackage{graphicx} % Required for inserting images
 \usepackage{graphicx} % Required for inserting images
 % Change page dimensions
@@ -146,7 +147,7 @@ The BackProp by Bayes would take gradient ascent update: $$c \leftarrow c + \eta
 Now we introduce a new model design in which the weights themselves are correlated across lags, imposing temporal smoothness and correlation between adjacent lags' weights. The essential feature of this model is that we want to impose an AR(1) prior on weights $w=(w_1, w_2, \cdots, w_d)^T$. The model imposes a normal AR(1) prior on the sequence of weights: $$\begin{aligned}
     w_1 &\sim N(\mu_1, \sigma_1^2) \\
     w_k|w_{k-1} &\sim N(\phi w_{k-1},\sigma_w^2), k=2,3\cdots,d
-\end{aligned}$$ where the learnable $\phi$ determines strength of autocorrelation among lag weights. We want $|\phi|<1$ so that the most recent lag weight has higher influence than the past lag weight. If it's close to 1, it shows the weights next to each other have a strong correlation; vice versa.
+\end{aligned}$$ where the learnable $\phi$ determines strength of autocorrelation among lag weights. We want $|\phi|<1$ so that the most recent lag weight has a stronger influence than the past lag weight. If it's close to 1, it shows the weights next to each other have a strong correlation; vice versa. This learnable parameter is enforced within -1 and 1 by applying a tanh function to an unconstrained learning parameter in neural network, which makes the AR(1) weight decay a stationary process and variance of weights can converge to a constant. 
 The joint distribution of all weights is a multivariate normal distribution:
 $$p(w)=\mathcal{N}\left(w \mid \mu_p, \Sigma_p\right)$$
 where $\mu_{p, k}=\mu_1 \phi^k, \quad \Sigma_p[i, j]=\phi^{|i-j|} \operatorname{Var}\left(w_{\min }(i, j)\right),$ and 
@@ -429,8 +430,68 @@ The test region against the true values after training is \ref{fig:model7}:
         \label{fig:model7}
 \end{figure}
 
+\section{AR(2)-BNAR Model}
+Now we want to expand the AR(1)-BNAR model we have discussed in the previous section into a AR(2)-BNAR model. Now we want the weights to regress on the two most recent weights recursively. We set up two independent prior normal distributions for the first backward weight and the second backward weight. The remaining weights are auto-regressed on the two step weights afterward. The model design would be as follows:
+$$
+\begin{aligned}
+w_1 & \sim \mathcal{N}\left(\mu_1, \sigma_1^2\right) \\
+w_2 & \sim \mathcal{N}\left(\mu_2, \sigma_2^2\right) \\
+w_k \mid w_{k-1}, w_{k-2} & \sim \mathcal{N}\left(\phi_1 w_{k-1}+\phi_2 w_{k-2}, \sigma_w^2\right), \quad k \geq 3
+\end{aligned}
+$$ where $\mu_1, \mu_2, \sigma_1, \sigma_2, \phi_1, \phi_2, \sigma_w$ are all learnable parameters in the neural networks. We also want this AR(2) weight Gaussian process to be stationary, so we have the constraints $\phi_2 \in(-1,1), \quad \phi_1+\phi_2<1, \quad \phi_2-\phi_1<1$. Without doubt, this still defines a joint normal distribution for the prior weights: $w=[w_1,w_2,\cdots,w_d]^T$. For the prior mean, we have the recursive mean as follows: $E(w_1)=\mu_1, E(w_2)=\mu_2, E(w_3)=\phi_1\mu_2+\phi_2\mu_1, E(w_4)=\phi_1(\phi_1\mu_2+\phi_2\mu_1)+\phi_2\mu_2$ and so on. Finally we can have the following:
+$$
+\mu_p=\left[\begin{array}{c}
+\mu_1 \\
+\mu_2 \\
+\phi_1 \mu_2+\phi_2 \mu_1 \\
+\phi_1\left(\phi_1 \mu_2+\phi_2 \mu_1\right)+\phi_2 \mu_2 \\
+\vdots
+\end{array}\right]
+$$
+Now we derive the variance and covariance for each $w_k$. It's evident that $w_1$ and $w_2$ are two independent normal distributions given by the initial values. 
+
+We derive from $w_3$ now. If $w_3$ is a conditional normal distribution on $w_1$ and $w_2$. We can have $w_3=\phi_1w_2+\phi_2w_1+\eta$ where $\eta \sim N(0, \sigma^2_w)$. The expectation is $E(w_3)=\phi_1\mu_2+\phi_2\mu_1$. The variance is $$Var(w_3)=\phi_1^2\sigma^2_2+\phi^2_2\sigma_1^2+\sigma_w^2$$ by the independent assumption leading to the additive variance of each component.
+
+For $w_4$, we have $w_4=\phi_1w_3 + \phi_2w_2 +\eta$, the expectation is $E(w_4)=\phi_1(\phi_1\mu_2+\phi_2\mu_1)+\phi_2\mu_2=\phi_1\phi_2\mu_1+(\phi_2+\phi_1^2)\mu_2$, the variance is $$\begin{aligned}
+Var(w_4) &= \phi_1^2Var(w_3)+\phi_2^2Var(w_2)+\sigma_w^2 + 2\phi_1\phi_2Cov(w_3,w_2) \\
+&= \phi_1^2(\phi_1^2\sigma^2_2+\phi^2_2\sigma_1^2+\sigma_w^2)+\phi^2_2\sigma^2_2+\sigma^2_w+2\phi_1\phi_2\phi_1\sigma^2_2\\
+&=\phi^2_1\phi^2_2\sigma^2_1 + (\phi^2_1+\phi_2)^2\sigma^2_2 + (1+\phi^2_1)\sigma^2_w
+\end{aligned}$$
+
+For $w_5$, we have $w_5=\phi_1w_4 + \phi_2w_3+\eta$, then the expectation is as follows: 
+$$
+E(w_5)=(\phi^2_1\phi_2+\phi^2_2)\mu_1 + (\phi^3_1+2\phi_1\phi_2)\mu_2
+$$ and so on.
+
+Then we would like to derive the general formula for this sequence $w_k$ with respect to $w_1$ and $w_2$, so it's easy to directly calculate the expectations and variance. First, we define the recursive coefficients 
+$$
+\psi_0=1, \quad \psi_1=\phi_1, \quad \psi_j=\phi_1 \psi_{j-1}+\phi_2 \psi_{j-2}(j \geq 2)
+$$ Then for any $k>=3$, we can have the following recursive formula w.r.t to two independent normal distributions $w_1$ and $w_2$:
+\begin{equation}
+    w_k=\psi_{k-2} w_2+\phi_2 \psi_{k-3} w_1+\sum_{j=0}^{k-3} \psi_j \eta_{k-j}
+    \label{eq:general}
+\end{equation}
+Once we have this general recursive formula for each $w_k$, it's much easier to express the expectation and variance for each as follows:
+$$
+E(w_k) = \phi_2\psi_{k-3}\mu_1 + \psi_{k-2}\mu_2
+$$
+The variance for each is as follows:
+$$
+Var\left(w_k\right)=\psi_{k-2}^2 \sigma_2^2+\left(\phi_2 \psi_{k-3}\right)^2 \sigma_1^2+\sigma_w^2 \sum_{j=0}^{k-3} \psi_j^2
+$$
+
+
+\subsection{Model 5}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/AR2_model5.png}
+    \caption{AR(2)-BNAR Model for model 5 on test set}
+    \label{fig:ar2-model5}
+\end{figure}
+
+
 \section{Bayesian Nonlinear Expansion NAR Model}
-This section we introduce a new model called Bayesian Nonlinear Expansion Neural Auto-regression Time Series Model. The motivation of designing this model is to help the problems that happen in the last model when the previous model underestimates the high frequency vibration nonlinear time series. As we can observe from the simulation model 4, 5, 6, 7 and their modeled predicted mean, the predicted mean can barely capture the ups and downs of the underlying true time series. As we ponder, we found that all these simulation models have the logarithmic operation which can make a single tanh activation function of a linear combination of lagged time series hard to capture the real pattern. As a result, we think about adding the nonlinear transformations to the each lag including polynomial, absolute value, logarithmic, Fourier features to expand the basis. The essential model specification is for each lag, we take different nonlinear transformations to expand this single lag value into a vector as follows:
+In this section, we introduce a new model called the Bayesian Nonlinear Expansion Neural Auto-regression Time Series Model. The motivation for designing this model is to address the problems that occurred in the previous model when the previous model underestimates the high-frequency vibration nonlinear time series. As we can observe from the simulation model 4, 5, 6, 7, and their modeled predicted mean, the predicted mean can barely capture the ups and downs of the underlying true time series. As we ponder, we found that all these simulation models have the logarithmic operation, which can make a single tanh activation function of a linear combination of lagged time series hard to capture the real pattern. As a result, we think about adding the nonlinear transformations to each lag, including polynomial, absolute value, logarithmic, and Fourier features to expand the basis. The essential model specification is that for each lag, we take different nonlinear transformations to expand this single lag value into a vector as follows:
 $$
 \phi\left(x_{t-k}\right)=\left[\begin{array}{c}
 x_{t-k} \\
@@ -445,17 +506,717 @@ x_{t-k}^P \\
 \sin \left(f_m \pi X_{t-k}\right) \\
 \cos \left(f_m \pi X_{t-k}\right)
 \end{array}\right]
-$$ where $P$ is the maximum number of polynomial degree, $f_1,\cdots,f_m$ are the Fourier frequency we select for the model. The full expansion of lag features is: 
+$$ where $P$ is the maximum number of polynomial degree, $f_1,\cdots,f_m$ are the Fourier frequency we select for the model. We can choose which nonlinear transformation functions to use and what degree to use for each. For example, if we assume the model only has the polynomial structure, we can only expand the polynomial term for each lag. The full expansion of lag features is: 
 $$\Phi_t=\left[\begin{array}{c}
 \phi\left(X_{t-1}\right) \\
 \phi\left(X_{t-2}\right) \\
 \vdots \\
 \phi\left(X_{t-d}\right)
 \end{array}\right]$$
-After this lagged feature is built, we would have our model predicted mean as follows:
+After this lagged feature is built, we would have our model's predicted mean as follows:
 $$
 x_t=f\left(\mathbf{w}^{\top} \Phi_t+b\right)
-$$ where $f$ is the activation function
+$$ where $f$ is the activation function including \textit{tanh, identity, relu, elu, softplus} and other customized functions. This activation can be one of the tuning parameters to improve the model's performance. In our demonstration, we primarily focus on \textit{tanh} activation function. In this model specification, we don't impose any structural assumptions on the weights because it's hard to specify a logic for the weight decay of the nonlinear expansion of each lag. We set up an independent normal distribution for each prior weight and a full-covariance normal distribution for all posterior weights. As before, the model directly learns the lower-triangular matrix $L_q$ to construct the full covariance matrix $L_q\cdot L_q^T$ as follows:
+$$
+q(\textbf{w}) = N(\textbf{w}| m_w, L_qL_q^T)
+$$ where $L_q$ is a learnable lower triangular Cholesky matrix. All other parameters in the model are learnable. The ELBO loss function and KL term all stay the same as before. 
 
+Next, we compare the simulated model test set side by side for this model and the previous model. For simulated model 4, 5, 6 and 7, we use the same the nonlinear expansion for each lag. We choose the polynomial degree up to 3, Fourier frequency up to 3, absolute value and no logarithmic. The full expanded lag features are as follows:
+$$\Phi\left(X_{\mathrm{lag}}(t)\right)=\left[\Phi_{\mathrm{poly}^{(3)}}(t), \Phi_{\mathrm{abs}^{(1)}}(t), \Phi_{\text{fourier}^{(3)}}(t)\right]^{\top}$$
+
+\subsection{Model 4}
+The simulated model 4 is as follows:
+$$X_t=0.2+\log \left(0.5+\left|X_{t-1}\right|\right)+\epsilon_t$$
+We select the $d=2$ for the lag. The table \ref{tab:model4_comparison} is the model performance comparison. The figure \ref{fig:model4} is the test set comparison. 
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model4_test_NL.png}
+        \caption{The Test Set of Model 4 of the BNE-NAR tanh activation model}
+        \label{fig:sub4_2}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model4_test_BNE_linear.png}
+        \caption{The Test Set of Model 4 of the BNE-NAR linear activation model}
+        \label{fig:sub4_4}
+    \end{subfigure}
+    
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model4_test_com.png}
+        \caption{The Test Set of Model 4 of the AR(1)-NAR tanh activation model}
+        \label{fig:sub4_1}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model4_test_com_linear.png}
+        \caption{The Test Set of Model 4 of the AR(1)-NAR linear activation model}
+        \label{fig:sub4_3}
+    \end{subfigure}
+    \caption{The comparison of two models on the test set of Model 4}
+    \label{fig:model4}
+\end{figure}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 4}
+\label{tab:model4_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+BNE-tanh NAR & 0.914 & 0.926 & 0.934 \\
+BNE-linear NAR & 0.943 & 0.966 & 0.947 \\
+AR(1)-tanh NAR & 0.926 & 0.946 & 0.934 \\
+AR(1)-linear NAR & 0.951 & 0.973 & 0.954 \\
+\midrule
+\textbf{RMSE} & & & \\
+BNE-tanh NAR & 0.9994 & 0.9245 & 0.9564 \\
+BNE-linear NAR & 1.0202 & 0.9419 & 1.0306 \\
+AR(1)-tanh NAR & 1.1454 & 1.0229 & 1.0912 \\
+AR(1)-linear NAR & 1.1445 & 1.0264 & 1.0904 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As we can tell from the table \ref{tab:model4_comparison}, the model BNE-NAR has slightly lower 95\% coverage probability but has lower RMSE than the model AR(1)-NAR on the training, validation, and test sets. It is evident in the figure \ref{fig:model4} that the predicted mean in the BNE-NAR model is closer to the actual values and follows the ups and downs trend of the actual values, while the predicted mean of AR(1)-NAR is stable around zero instead of actually learning the pattern of true values. 
+
+\newpage
+
+\subsection{Model 5}
+The simulated model 5 is as follows:
+$$X_t=2 \cdot \log \left(X_{t-1}^2\right)+\epsilon_t$$
+We select the $d=2$ for the lag. The table \ref{tab:model5_comparison} is the model performance comparison. The figure \ref{fig:model5} is the test set comparison. 
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model5_test_NL.png}
+        \caption{The Test Set of Model 5 of the BNE-NAR tanh activation model}
+        \label{fig:sub5_2}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model5_test_BNE_linear.png}
+        \caption{The Test Set of Model 5 of the BNE-NAR linear activation model}
+        \label{fig:sub5_4}
+    \end{subfigure}
+    
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model5_test_com.png}
+        \caption{The Test Set of Model 5 of the AR(1)-NAR tanh activation model}
+        \label{fig:sub5_1}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model5_test_com_linear.png}
+        \caption{The Test Set of Model 5 of the AR(1)-NAR linear activation model}
+        \label{fig:sub5_3}
+    \end{subfigure}
+    \caption{The comparison of two models on the test set of Model 5}
+    \label{fig:model5}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 5}
+\label{tab:model5_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+BNE-tanh NAR & 0.986 & 1.000 & 0.987 \\
+BNE-linear NAR & 0.968 & 0.960 & 0.954 \\
+AR(1)-tanh NAR & 0.973 & 0.987 & 0.974 \\
+AR(1)-linear NAR & 0.928 & 0.946 & 0.967 \\
+\midrule
+\textbf{RMSE} & & & \\
+BNE-tanh NAR & 1.0286 & 0.9246 & 0.9770 \\
+BNE-linear NAR & 1.5241 & 1.4233 & 1.4802 \\
+AR(1)-tanh NAR & 1.0235 & 0.9322 & 0.9831 \\
+AR(1)-linear NAR & 1.1274 & 1.0320 & 1.0434 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As we can tell from the table \ref{tab:model5_comparison}, the model BNE-NAR has slightly higher 95\% coverage probability and has lower RMSE than the model AR(1)-NAR on the validation and test sets. It is evident in the figure \ref{fig:model5} that the predicted mean in the BNE-NAR model is closer to the actual values and follows the ups and downs trend of the actual values better than AR(1)-NAR model. 
+
+\newpage
+
+\subsection{Model 6}
+The simulated model 6 is as follows:
+$$X_t=\log \left(10+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}\right)+\epsilon_t$$
+We select the $d=2$ for the lag. The table \ref{tab:model6_comparison} is the model performance comparison. The figure \ref{fig:model6} is the test set comparison. 
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model6_test_NL.png}
+        \caption{The Test Set of Model 6 of the BNE-NAR tanh activation model}
+        \label{fig:sub6_2}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model6_test_BNE_linear.png}
+        \caption{The Test Set of Model 6 of the BNE-NAR linear activation model}
+        \label{fig:sub6_4}
+    \end{subfigure}
+    
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model6_test_com.png}
+        \caption{The Test Set of Model 6 of the AR(1)-NAR tanh activation model}
+        \label{fig:sub6_1}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model6_test_com_linear.png}
+        \caption{The Test Set of Model 6 of the AR(1)-NAR linear activation model}
+        \label{fig:sub6_3}
+    \end{subfigure}
+    \caption{The comparison of two models on the test set of Model 6}
+    \label{fig:model6}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 6}
+\label{tab:model6_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+BNE-tanh NAR & 1.000 & 1.000 & 1.000 \\
+BNE-linear NAR & 0.765 & 0.799 & 0.762 \\
+AR(1)-tanh NAR & 0.989 & 1.000 & 0.967 \\
+AR(1)-linear NAR & 0.931 & 0.960 & 0.954 \\
+\midrule
+\textbf{RMSE} & & & \\
+BNE-tanh NAR & 1.0779 & 0.9644 & 1.0225 \\
+BNE-linear NAR & 2.1364 & 1.9922 & 2.2125 \\
+AR(1)-tanh NAR & 1.5066 & 1.3121 & 1.7887 \\
+AR(1)-linear NAR & 1.1223 & 1.0191 & 1.0327 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As we can tell from the table \ref{tab:model6_comparison}, the model BNE-NAR has much higher 95\% coverage probability close to 100\% and much lower RMSE than the model AR(1)-NAR on the training, validation, and test sets. It is evident in the figure \ref{fig:model6} that the predicted mean in the BNE-NAR model is much closer to the actual values and follows the ups and downs trend of the actual values, while the predicted mean of AR(1)-NAR is very loosely following the true trend and has a big gap between them. 
+
+\newpage
+
+\subsection{Model 7}
+The simulated model 7 is as follows:
+$$X_t=\log \left(10+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}\right)+\epsilon_t$$
+We select the $d=2$ for the lag. The table \ref{tab:model7_comparison} is the model performance comparison. The figure \ref{fig:model7} is the test set comparison. 
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model7_test_NL.png}
+        \caption{The Test Set of Model 7 of the BNE-NAR tanh activation model}
+        \label{fig:sub7_2}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+    \includegraphics[width=\linewidth,height=0.22\textheight]{img/model7_test_BNE_linear.png}
+        \caption{The Test Set of Model 7 of the BNE-NAR linear activation model}
+        \label{fig:sub7_4}
+    \end{subfigure}
+    
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model7_test_com.png}
+        \caption{The Test Set of Model 7 of the AR(1)-NAR tanh activation model}
+        \label{fig:sub7_1}
+    \end{subfigure}
+
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.22\textheight]{img/model7_test_com_linear.png}
+        \caption{The Test Set of Model 7 of the AR(1)-NAR linear activation model}
+        \label{fig:sub7_3}
+    \end{subfigure}
+    \caption{The comparison of two models on the test set of Model 7}
+    \label{fig:model7}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 7}
+\label{tab:model7_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+BNE-tanh NAR & 0.999 & 1.000 & 1.000 \\
+BNE-linear NAR & 0.027 & 0.040 & 0.040 \\
+AR(1)-tanh NAR & 0.990 & 1.000 & 1.000 \\
+AR(1)-linear NAR & 0.934 & 0.946 & 0.940 \\
+\midrule
+\textbf{RMSE} & & & \\
+BNE-tanh NAR & 1.2356 & 0.9792 & 1.2889 \\
+BNE-linear NAR & 98.4294 & 89.9463 & 110.0042 \\
+AR(1)-tanh NAR & 1.8576 & 1.1635 & 2.0142 \\
+AR(1)-linear NAR & 1.1465 & 0.9986 & 1.1226 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As we can tell from the table \ref{tab:model7_comparison}, the model BNE-NAR has slightly higher 95\% coverage probability but has much lower RMSE than the model AR(1)-NAR on the training, validation, and test sets. It is evident in the figure \ref{fig:model7} that the predicted mean in the BNE-NAR model is closer to the actual values and follows the ups and downs trend of the actual values and overall patterns, while the predicted mean of AR(1)-NAR is stable around 28 instead of actually learning the pattern of true values. 
+
+\newpage
+
+\section{Bernstein-BNAR}
+Given the above nonlinear expansion for each lag, we want to introduce the this new adapted model design Bernstein-BNAR model in light of Bernstein polynomial approximation of a function. Given the inspiration from the previous model, we have ordinary polynomial expansion such as $x, x^2, x^3$. Now we want to build the polynomial expansions that can try to approximate the continuous function. As a result, the Bernstein polynomial basis sheds light on this idea. The Bernstein basis polynomial is for any $0<x<1$:
+$$
+B_{k, n}(x)=\binom{n}{k} x^k(1-x)^{n-k}, \quad k=0,1, \ldots, n .
+$$
+Then we have $\sum_{k=0}^n B_{k, n}(x)=1$ because the $B_{k,n}(x)$ is basically the probability of each binomial value. Once we have this Bernstein polynomial, we want to use it to approximate the continuous function in the following way:
+$$B_n(f)(x)=\sum_{k=0}^n f\left(\frac{k}{n}\right) B_{k, n}(x)$$ which is a weighted average of a sequence values of $B_{k,n}(x)$ by the binomial probability. This idea is proved by the Weierstrass Approximation Theorem, which states that polynomials can approximate any continuous function from [0,1]. Regarding the limitation, we have 
+\begin{equation}
+    \lim_{n \rightarrow \infty} B_n(f)(x)=f(x)
+    \label{eq:ber}
+\end{equation}
+
+Next, we simulate a complicated continuous function on the [0,1] and use different degrees of Bernstein basis polynomials to prove the approximation theory proved by Karl Weierstrass visually. We compose a complex continuous function on the [0,1] which has multiple ups and downs to mimic the behavior of high-frequency time series in reality, with a sin function, a cos function, and a linear function as an overall trend, as follows:
+$$y = 3x + 3\sin(4\pi x) + 2\cos(5\pi x)$$
+We use the degree of [5, 10, 20, 40, 80, 160, 320] each to display the approximations to the true function $y$ as follows, Figure \ref{fig:bernstein}.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/bernstein.png}
+    \caption{The simulated true function against approximations of different Bernstein degrees}
+    \label{fig:bernstein}
+\end{figure}
+As we can observe, as the degree increases, the approximating functions approach the true function, visually confirming the equations \ref{eq:ber}. When the $n=5$, the blue curve is far away from the true black line. When the $n=320$, the pink curve is almost overlapping with the black true curve. 
+
+We apply the Bernstein basis polynomial to fit the nonlinear complex time series. The first principle is that we assume the next step prediction is a linear combination of the nonlinear transformation of previous steps, as follows:
+$$x_t = f_1(x_{t-1})+f_2(x_{t-2})+\cdots+f_d(x_{t-d})+\epsilon_t$$
+However, we don't know the exact analytical form of the nonlinear function $f_i$. As a result, we use the Bernstein basis polynomials to approximate each nonlinear function $f_i$. We expect each function $f_i$ to be smooth and flexible. Each function has the form as follows:
+$$
+f_k\left(z_{t-k}\right)=\beta_{k, 0} B_{0, n}\left(z_{t-k}\right)+\beta_{k, 1} B_{1, n}\left(z_{t-k}\right)+\cdots+\beta_{k, n} B_{n, n}\left(z_{t-k}\right)
+$$ where $z_{t-k}$ is the scaled $x_{t-k}$ within 0 and 1. 
+Then we can combine the expanded function $f_i$ into a complex summation to predict the $x_t$ as follows:
+$$z_t=\sum_{k=1}^d \sum_{j=0}^n \beta_{k, j} B_{j, n}\left(z_{t-k}\right)+\epsilon_t$$ where the coefficients $\beta_{k,j}$ are learnable parameters in the Bayesian Neural Network to provide the uncertainty of predictions. In essence, we are learning and approximating the nonlinear function $f_i$ for each lag. 
+
+If we use the additive of nonlinear functions, it's easy to interpret the effect of each lag on the prediction step separately. As a result, we can evaluate the partial effect by focusing on each nonlinear approximation $\hat{f}_k(x)=\sum_{j=0}^n \beta_{k, j} B_{j, n}(x)$ and visualize it. We still use the Bayesian Neural Network to learn the parameters $\beta_{k,j}$. The following diagram \ref{fig:bernstein} is the detailed diagram of this model. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{img/bernstein.drawio.pdf}
+    \caption{The flow diagram of Bernstein NAR Model}
+    \label{fig:bernstein}
+\end{figure}
+Next, we display the running result from simulation model 4 to model 7 to see how it performs on each simulated data. 
+
+\subsection{Model 4}
+The model is as follows: $$X_t=0.2+\log \left(0.5+\left|X_{t-1}\right|\right)+\epsilon_t$$
+We use parallelization computing to carry out a grid search of combinations of lags $d$ and Bernstein degree with a tanh activation function. The lag grid is $[2, 3, 4, 5, 6, 7]$ and the Bernstein polynomial degree is $[8, 9, 10, 11, 12, 13, 14, 15]$. After training and searching, the visualization of the RMSE vs Ljung–Box Trade-off is as follows \ref{fig:model4_rmse_ljung}. The model of red dots in the \ref{fig:model4_rmse_ljung} is Pareto optimal if no other models has lower RMSE and higher p-values. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/model4_rmse_ljung.png}
+    \caption{Model 4 RMSE vs Ljung-Box Trade-off}
+    \label{fig:model4_rmse_ljung}
+\end{figure}
+The best model that has over 0.05 validation Ljung-box p-value and the smallest validation RMSE is when $d=5$ and degree$=13$. The following graph \ref{fig:model4-pw} is the posterior mean and standard deviation of weights of model 4. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{img/model4-post-mean-weight.png}
+    \caption{Model 4 Posterior Model Weight and Std}
+    \label{fig:model4-pw}
+\end{figure}
+The following graph \ref{fig:model4-acf} is the Test set residual ACF and PACF. 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{img/model4-pac.png}
+    \caption{Model 4 Test Residual ACF and PACF}
+    \label{fig:model4-acf}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/model4_test_bernstein.png}
+    \caption{The Model 4 test set with Berstein BNR}
+    \label{fig:model4_ber}
+\end{figure}
+
+The table \ref{tab:model4-residual_diagnostics} of Shapiro--Wilk (SW) and Jarque--Bera (JB) tests assess residual normality. The Ljung--Box test evaluates residual autocorrelation up to lag 20. Large $p$-values indicate no evidence against the null hypotheses of normality and residual whiteness, respectively.
+\begin{table}[htbp]
+\centering
+\caption{Model 4 of Residual Diagnostics for the Selected Bernstein--BNAR Model}
+\label{tab:model4-residual_diagnostics}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Dataset} 
+& \textbf{Shapiro--Wilk} 
+& \textbf{SW $p$-value} 
+& \textbf{Jarque--Bera} 
+& \textbf{JB $p$-value} \\
+\hline
+Train       & 0.9983 & 0.7192 & 1.0912 & 0.5795 \\
+Validation  & 0.9903 & 0.3930 & 1.9051 & 0.3858 \\
+Test        & 0.9837 & 0.0736 & 3.8050 & 0.1492 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+
+\begin{tabular}{lcc}
+\hline
+\textbf{Dataset} 
+& \textbf{Ljung--Box Statistic (lag=20)} 
+& \textbf{LB $p$-value} \\
+\hline
+Train       & 17.1206 & 0.6451 \\
+Validation  & 19.7941 & 0.4709 \\
+Test        & 36.0039 & 0.0154 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+\end{table}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 4}
+\label{tab:model4_ber}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+Bernstein-tanh NAR & 0.922 & 0.940 & 0.933 \\
+BNE-tanh NAR & 0.914 & 0.926 & 0.934 \\
+BNE-linear NAR & 0.943 & 0.966 & 0.947 \\
+AR(1)-tanh NAR & 0.926 & 0.946 & 0.934 \\
+AR(1)-linear NAR & 0.951 & 0.973 & 0.954 \\
+\midrule
+\textbf{RMSE} & & & \\
+Bernstein-tanh NAR & 0.9975 & 0.9233 & 0.9951 \\
+BNE-tanh NAR & 0.9994 & 0.9245 & 0.9564 \\
+BNE-linear NAR & 1.0202 & 0.9419 & 1.0306 \\
+AR(1)-tanh NAR & 1.1454 & 1.0229 & 1.0912 \\
+AR(1)-linear NAR & 1.1445 & 1.0264 & 1.0904 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
+\subsection{Model 5}
+Model: $$X_t=2 \cdot \log \left(X_{t-1}^2\right)+\epsilon_t$$
+We use the same grid search with a tanh activation function as before to find the best d and degree.
+We use parallelization computing to carry out a grid search of combinations of lags $d$ and Bernstein degree with a tanh activation function. The lag grid is $[2, 3, 4, 5, 6, 7]$ and the Bernstein polynomial degree is $[8, 9, 10, 11, 12, 13, 14, 15]$. After training and searching, the visualization of the RMSE vs Ljung–Box Trade-off is as follows \ref{fig:model5_rmse_ljung}. The model of red dots in the \ref{fig:model5_rmse_ljung} is Pareto optimal if no other models has lower RMSE and higher p-values. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/model5_rmse_ljung.png}
+    \caption{Model 5 RMSE vs Ljung-Box Trade-off}
+    \label{fig:model5_rmse_ljung}
+\end{figure}
+The best model that has an over 0.05 validation Ljung-box p-value and the smallest validation RMSE is when $d=5$ and degree$=8$. The following graph \ref{fig:model5-pw} is the posterior mean and standard deviation of the weights of model 5. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{img/model5-post-mean-weight.png}
+    \caption{Model 5 Posterior Model Weight and Std}
+    \label{fig:model5-pw}
+\end{figure}
+The following graph \ref{fig:model5-acf} is the Test set residual ACF and PACF. 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{img/model5-pac.png}
+    \caption{Model 5 Test Residual ACF and PACF}
+    \label{fig:model5-acf}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/model5_test_bernstein.png}
+    \caption{The Model 5 test set with Berstein BNR}
+    \label{fig:model5_ber}
+\end{figure}
+
+The table \ref{tab:model5-residual_diagnostics} of Shapiro--Wilk (SW) and Jarque--Bera (JB) tests assess residual normality. The Ljung--Box test evaluates residual autocorrelation up to lag 20. Large $p$-values indicate no evidence against the null hypotheses of normality and residual whiteness, respectively.
+\begin{table}[htbp]
+\centering
+\caption{Model 5 of Residual Diagnostics for the Selected Bernstein--BNAR Model}
+\label{tab:model5-residual_diagnostics}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Dataset} 
+& \textbf{Shapiro--Wilk} 
+& \textbf{SW $p$-value} 
+& \textbf{Jarque--Bera} 
+& \textbf{JB $p$-value} \\
+\hline
+Train       & 0.9982 & 0.6813 & 1.4267 & 0.49 \\
+Validation  & 0.9886 & 0.2638 & 2.9375 & 0.2302 \\
+Test        & 0.9884 & 0.2481 & 2.6719 & 0.2629 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+
+\begin{tabular}{lcc}
+\hline
+\textbf{Dataset} 
+& \textbf{Ljung--Box Statistic (lag=20)} 
+& \textbf{LB $p$-value} \\
+\hline
+Train       & 18.6519 & 0.5445 \\
+Validation  & 19.7371 & 0.4745 \\
+Test        & 37.0201 & 0.01164 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 5}
+\label{tab:model5_test_ber}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+Bernstein-tanh NAR & 0.966 & 0.966 & 0.960 \\
+BNE-tanh NAR & 0.986 & 1.000 & 0.987 \\
+BNE-linear NAR & 0.968 & 0.960 & 0.954 \\
+AR(1)-tanh NAR & 0.973 & 0.987 & 0.974 \\
+AR(1)-linear NAR & 0.928 & 0.946 & 0.967 \\
+\midrule
+\textbf{RMSE} & & & \\
+Bernstein-tanh NAR & 0.9925 & 0.9199 & 1.0101 \\
+BNE-tanh NAR & 1.0286 & 0.9246 & 0.9770 \\
+BNE-linear NAR & 1.5241 & 1.4233 & 1.4802 \\
+AR(1)-tanh NAR & 1.0235 & 0.9322 & 0.9831 \\
+AR(1)-linear NAR & 1.1274 & 1.0320 & 1.0434 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\newpage
+\subsection{Model 6}
+Model: $$X_t=\log \left(10+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}\right)+\epsilon_t$$
+We use the same grid search with a tanh activation function as before to find the best d and degree.
+We use parallelization computing to carry out a grid search of combinations of lags $d$ and Bernstein degree with a tanh activation function. The lag grid is $[2, 3, 4, 5, 6, 7]$ and the Bernstein polynomial degree is $[8, 9, 10, 11, 12, 13, 14, 15]$. After training and searching, the visualization of the RMSE vs Ljung–Box Trade-off is as follows \ref{fig:model6_rmse_ljung}. The model of red dots in the \ref{fig:model6_rmse_ljung} is Pareto optimal if no other models has lower RMSE and higher p-values. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/model6_rmse_ljung.png}
+    \caption{Model 6 RMSE vs Ljung-Box Trade-off}
+    \label{fig:model6_rmse_ljung}
+\end{figure}
+The best model that has an over 0.05 validation Ljung-box p-value and the smallest validation RMSE is when $d=3$ and degree$=14$. The following graph \ref{fig:model6-pw} is the posterior mean and standard deviation of the weights of model 6. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{img/model6-post-mean-weight.png}
+    \caption{Model 6 Posterior Model Weight and Std}
+    \label{fig:model6-pw}
+\end{figure}
+The following graph \ref{fig:model6-acf} is the Test set residual ACF and PACF. 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{img/model6-pac.png}
+    \caption{Model 6 Test Residual ACF and PACF}
+    \label{fig:model6-acf}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/model6_test_bernstein.png}
+    \caption{The Model 6 test set with Berstein BNR}
+    \label{fig:model6_ber}
+\end{figure}
+
+The table \ref{tab:model6-residual_diagnostics} of Shapiro--Wilk (SW) and Jarque--Bera (JB) tests assess residual normality. The Ljung--Box test evaluates residual autocorrelation up to lag 20. Large $p$-values indicate no evidence against the null hypotheses of normality and residual whiteness, respectively.
+\begin{table}[htbp]
+\centering
+\caption{Residual Diagnostics for Bernstein--BNAR Model 6}
+\label{tab:model6-residual_diagnostics}
+
+% -------------------------------
+% Normality tests
+% -------------------------------
+\begin{tabular}{lcccc}
+\hline
+\textbf{Dataset} 
+& \textbf{Shapiro--Wilk} 
+& \textbf{SW $p$-value} 
+& \textbf{Jarque--Bera} 
+& \textbf{JB $p$-value} \\
+\hline
+Train       & 0.9990 & 0.9785 & 0.5075 & 0.7759 \\
+Validation  & 0.9817 & 0.0446 & 3.7733 & 0.1516 \\
+Test        & 0.9940 & 0.7890 & 0.8315 & 0.6598 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+
+% -------------------------------
+% Ljung--Box tests
+% -------------------------------
+\begin{tabular}{lcc}
+\hline
+\textbf{Dataset} 
+& \textbf{Ljung--Box Statistic (lag=20)} 
+& \textbf{LB $p$-value} \\
+\hline
+Train       & 102.9913 & $3.66 \times 10^{-13}$ \\
+Validation  & 43.0054  & 0.00204 \\
+Test        & 47.1522  & 0.00056 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+\end{table}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 6}
+\label{tab:model6_test_ber}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+Bernstein-tanh NAR & 0.999 & 1.000 & 0.993 \\
+BNE-tanh NAR & 1.000 & 1.000 & 1.000 \\
+BNE-linear NAR & 0.765 & 0.799 & 0.762 \\
+AR(1)-tanh NAR & 0.989 & 1.000 & 0.967 \\
+AR(1)-linear NAR & 0.931 & 0.960 & 0.954 \\
+\midrule
+\textbf{RMSE} & & & \\
+Bernstein-tanh NAR & 1.0528 & 0.9732 & 1.0543 \\
+BNE-tanh NAR & 1.0779 & 0.9644 & 1.0225 \\
+BNE-linear NAR & 2.1364 & 1.9922 & 2.2125 \\
+AR(1)-tanh NAR & 1.5066 & 1.3121 & 1.7887 \\
+AR(1)-linear NAR & 1.1223 & 1.0191 & 1.0327 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model 7}
+Model: $$X_t=\log \left(4 \cdot \mathrm{e}^{0.9 \cdot X_{t-2}}+5 \cdot \mathrm{e}^{0.9 \cdot X_{t-1}}+6 \cdot \mathrm{e}^{0.9 \cdot X_{t-3}}\right)+\epsilon_t$$
+We use the same grid search with a tanh activation function as before to find the best d and degree.
+We use parallelization computing to carry out a grid search of combinations of lags $d$ and Bernstein degree with a tanh activation function. The lag grid is $[2, 3, 4, 5, 6, 7]$ and the Bernstein polynomial degree is $[8, 9, 10, 11, 12, 13, 14, 15]$. After training and searching, the visualization of the RMSE vs Ljung–Box Trade-off is as follows \ref{fig:model7_rmse_ljung}. The model of red dots in the \ref{fig:model7_rmse_ljung} is Pareto optimal if no other models has lower RMSE and higher p-values. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/model7_rmse_ljung.png}
+    \caption{Model 7 RMSE vs Ljung-Box Trade-off}
+    \label{fig:model7_rmse_ljung}
+\end{figure}
+The best model that has an over 0.05 validation Ljung-box p-value and the smallest validation RMSE is when $d=3$ and degree$=13$. The following graph \ref{fig:model7-pw} is the posterior mean and standard deviation of the weights of model 7. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{img/model7-post-mean-weight.png}
+    \caption{Model 7 Posterior Model Weight and Std}
+    \label{fig:model7-pw}
+\end{figure}
+The following graph \ref{fig:model7-acf} is the Test set residual ACF and PACF. 
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{img/model7-pac.png}
+    \caption{Model 7 Test Residual ACF and PACF}
+    \label{fig:model7-acf}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{img/model7_test_bernstein.png}
+    \caption{The Model 7 test set with Berstein BNR}
+    \label{fig:model7_ber}
+\end{figure}
+
+The table \ref{tab:residual_diagnostics_model7} shows that the residuals from Model 7 are approximately normal across the training, validation, and test sets. However, the Ljung–Box test strongly rejects the null hypothesis of no residual autocorrelation for the training and test sets, indicating substantial remaining temporal dependence, despite adequate distributional fit to the data, low RMSE.
+\begin{table}[htbp]
+\centering
+\caption{Residual Diagnostics for Bernstein--BNAR Model 7}
+\label{tab:residual_diagnostics_model7}
+
+% -------------------------------
+% Normality tests
+% -------------------------------
+\begin{tabular}{lcccc}
+\hline
+\textbf{Dataset} 
+& \textbf{Shapiro--Wilk} 
+& \textbf{SW $p$-value} 
+& \textbf{Jarque--Bera} 
+& \textbf{JB $p$-value} \\
+\hline
+Train       & 0.9980 & 0.5982 & 0.5838 & 0.7469 \\
+Validation  & 0.9907 & 0.4369 & 0.8025 & 0.6695 \\
+Test        & 0.9938 & 0.7701 & 0.9047 & 0.6361 \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+
+% -------------------------------
+% Ljung--Box tests
+% -------------------------------
+\begin{tabular}{lcc}
+\hline
+\textbf{Dataset} 
+& \textbf{Ljung--Box Statistic (lag=20)} 
+& \textbf{LB $p$-value} \\
+\hline
+Train       & 282.2352 & $3.38 \times 10^{-48}$ \\
+Validation  & 22.3378  & 0.3225 \\
+Test        & 191.2552 & $5.99 \times 10^{-30}$ \\
+\hline
+\end{tabular}
+
+\vspace{0.6em}
+\end{table}
+
+
+
+
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Comparison for simulated model 7}
+\label{tab:model7_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Train} & \textbf{Validation} & \textbf{Test} \\
+\midrule
+\textbf{Coverage Probability (95\% CI)} & & & \\
+Bernstein-tanh NAR & 1.000 & 1.000 & 1.000 \\
+BNE-tanh NAR & 0.999 & 1.000 & 1.000 \\
+BNE-linear NAR & 0.027 & 0.040 & 0.040 \\
+AR(1)-tanh NAR & 0.990 & 1.000 & 1.000 \\
+AR(1)-linear NAR & 0.934 & 0.946 & 0.940 \\
+\midrule
+\textbf{RMSE} & & & \\
+Bernstein-tanh NAR & 1.0842 & 0.9368 & 1.1926 \\
+BNE-tanh NAR & 1.2356 & 0.9792 & 1.2889 \\
+BNE-linear NAR & 98.4294 & 89.9463 & 110.0042 \\
+AR(1)-tanh NAR & 1.8576 & 1.1635 & 2.0142 \\
+AR(1)-linear NAR & 1.1465 & 0.9986 & 1.1226 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
 \printbibliography
 \end{document}
